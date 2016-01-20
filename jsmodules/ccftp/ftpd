@@ -1,0 +1,111 @@
+#!/usr/bin/env python
+
+from pyftpdlib.authorizers import DummyAuthorizer
+from pyftpdlib.handlers import FTPHandler
+from pyftpdlib.servers import FTPServer
+from pyftpdlib.filesystems import AbstractedFS
+import os
+import sys
+import json
+import re
+
+def env(str):
+    var = os.getenv(str)
+    if not var:
+        print("Environment variable not set: "+str)
+        sys.exit(1)
+    return var
+
+def penv(str): print(str+" = "+env(str))
+penv("DB")
+penv("DATA")
+penv("CC_ROOT")
+penv("PORT")
+penv("PASV_START")
+penv("PASV_END")
+del penv
+
+# Read JSON database
+print(env("DB"))
+with open(env("DB")) as f:
+    db = json.load(f)
+
+# Prepare user auth
+authorizer = DummyAuthorizer()
+for user in db["users"]:
+    if "/" in user["name"]:
+        print("User "+user["name"]+" has illegal name.")
+        continue
+
+    path = env("DATA")+"/"+user["name"]
+    authorizer.add_user(
+        user["name"],
+        user["pass"],
+        path,
+        perm="elradfmwM")
+
+# Custom virtual FS
+class CustomFS(AbstractedFS):
+    def validpath(self, path):
+        """Check whether the path belongs to user's home directory.
+        Expected argument is a "real" filesystem pathname.
+        If path is a symbolic link it is resolved to check its real
+        destination.
+        Pathnames escaping from user's root directory are considered
+        not valid.
+
+        Modified to allow symlinks to CC_ROOT.
+        """
+        assert isinstance(path, unicode), path
+        root = self.realpath(self.root)
+        ccroot = self.realpath(unicode(env("CC_ROOT")))
+        path = self.realpath(path)
+
+        if not root.endswith(os.sep):
+            root = root + os.sep
+        if not ccroot.endswith(os.sep):
+            ccroot = ccroot + os.sep
+        if not path.endswith(os.sep):
+            path = path + os.sep
+
+        if path[0:len(root)] == root:
+            return True
+        if path[0:len(ccroot)] == ccroot:
+            return True
+
+        return False
+
+    def islink(self, path):
+        return False
+
+    def isdir(self, path):
+        return os.path.isdir(path) or os.path.islink(path)
+
+    if hasattr(os, "lstat"):
+        def lstat(self, path):
+            """We actually want to follow symlinks, because
+            that's essential for only letting users see the computers they
+            should be able to see
+            """
+            return os.stat(path)
+
+    def get_user_by_uid(self, uid):
+        return "-"
+
+    def get_group_by_gid(self, gid):
+        return "-"
+
+# FTP handler
+class CustomHandler(FTPHandler):
+    authorizer = authorizer
+    passive_ports = range(int(env("PASV_START")), int(env("PASV_END")))
+    permit_foreign_addresses = True
+    abstracted_fs = CustomFS
+
+handler = CustomHandler
+
+# Disable active mode
+del handler.proto_cmds["PORT"]
+
+server = FTPServer(("", env("PORT")), handler)
+server.serve_forever()

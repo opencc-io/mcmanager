@@ -1,0 +1,8 @@
+{
+	"ccftp": {
+		"host": "0.0.0.0",
+		"ftpport": 21,
+		"pasvports": [8091, 8099],
+		"root": "mc/world/computer"
+	}
+}

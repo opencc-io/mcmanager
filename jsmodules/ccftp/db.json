@@ -1,0 +1,9 @@
+{
+	"users": [
+		{
+			"name": "mort",
+			"pass": "mar10n",
+			"computers": [3, 4]
+		}
+	]
+}
